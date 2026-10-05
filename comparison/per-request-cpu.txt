@@ -1,0 +1,38 @@
+#### per-request CPU (server pinned to core 0; 200 keep-alive conns; 8 s per endpoint)
+== cpp-epoll-khalefa-ow
+health rps=11763 errs=0 server-cpu=18% per-request: user=2.1us sys=13.5us total=15.6us
+post   rps=10132 errs=0 server-cpu=31% per-request: user=12.6us sys=18.5us total=31.0us
+feed   rps=11020 errs=0 server-cpu=62% per-request: user=41.6us sys=14.7us total=56.3us
+like   rps=8542 errs=0 server-cpu=86% per-request: user=35.9us sys=64.8us total=100.6us
+create rps=6534 errs=0 server-cpu=69% per-request: user=38.0us sys=68.3us total=106.3us
+mix    rps=6131 errs=0 server-cpu=51% per-request: user=44.8us sys=37.6us total=82.4us
+== c-fio-tbsvttr
+health rps=12244 errs=0 server-cpu=40% per-request: user=10.5us sys=22.0us total=32.5us
+post   rps=10464 errs=0 server-cpu=44% per-request: user=19.9us sys=22.4us total=42.3us
+feed   rps=10477 errs=0 server-cpu=74% per-request: user=48.8us sys=21.4us total=70.2us
+like   rps=5829 errs=0 server-cpu=69% per-request: user=56.3us sys=61.5us total=117.8us
+create rps=8810 errs=0 server-cpu=82% per-request: user=49.2us sys=44.2us total=93.4us
+mix    rps=11307 errs=0 server-cpu=61% per-request: user=31.0us sys=22.7us total=53.7us
+== cpp-uwebsockets-tbsvttr
+health rps=9449 errs=0 server-cpu=20% per-request: user=4.4us sys=16.9us total=21.3us
+post   rps=7937 errs=0 server-cpu=31% per-request: user=17.3us sys=22.3us total=39.6us
+feed   rps=11687 errs=0 server-cpu=70% per-request: user=44.3us sys=15.4us total=59.7us
+like   rps=2690 errs=0 server-cpu=73% per-request: user=135.3us sys=134.4us total=269.7us
+create rps=5355 errs=0 server-cpu=73% per-request: user=65.9us sys=70.3us total=136.2us
+mix    rps=11615 errs=0 server-cpu=56% per-request: user=28.1us sys=20.0us total=48.1us
+== typescript-bun-khalefa-ow
+health rps=10413 errs=0 server-cpu=40% per-request: user=18.2us sys=20.4us total=38.6us
+post   rps=11204 errs=0 server-cpu=57% per-request: user=29.4us sys=21.1us total=50.5us
+feed   rps=14828 errs=0 server-cpu=92% per-request: user=49.6us sys=12.8us total=62.3us
+like   rps=6644 errs=0 server-cpu=90% per-request: user=64.0us sys=71.5us total=135.5us
+create rps=5755 errs=0 server-cpu=76% per-request: user=65.7us sys=65.7us total=131.4us
+mix    rps=14605 errs=0 server-cpu=82% per-request: user=37.4us sys=19.0us total=56.5us
+== python-fastapi-cknutson12
+health rps=8471 errs=0 server-cpu=114% per-request: user=111.9us sys=22.5us total=134.5us
+post   rps=4308 errs=0 server-cpu=95% per-request: user=177.8us sys=41.9us total=219.7us
+feed   rps=4180 errs=0 server-cpu=95% per-request: user=184.4us sys=42.2us total=226.7us
+like   rps=2314 errs=0 server-cpu=86% per-request: user=264.8us sys=106.4us total=371.2us
+create rps=3043 errs=0 server-cpu=104% per-request: user=247.4us sys=93.7us total=341.1us
+mix    rps=3883 errs=0 server-cpu=94% per-request: user=195.4us sys=46.1us total=241.5us
+
+[exited with code 0]
