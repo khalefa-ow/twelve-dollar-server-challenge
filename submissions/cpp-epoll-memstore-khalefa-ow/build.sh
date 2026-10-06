@@ -25,5 +25,5 @@ CXXFLAGS=(-std=c++17 -Wall -Wextra -Wno-deprecated-declarations)
 [ vendor/sqlite3.o -nt vendor/sqlite3.c ] ||
   gcc -O2 -DSQLITE_THREADSAFE=0 -DSQLITE_OMIT_LOAD_EXTENSION -c vendor/sqlite3.c -o vendor/sqlite3.o
 g++ "${OPT[@]}" "${CXXFLAGS[@]}" -Ivendor src/import.cpp vendor/sqlite3.o -o bin/import
-g++ "${OPT[@]}" "${CXXFLAGS[@]}" src/server.cpp -o bin/server -lcrypto
+g++ "${OPT[@]}" "${CXXFLAGS[@]}" src/server.cpp -o bin/server -lcrypto -pthread
 echo "built $(pwd)/bin/server and bin/import"

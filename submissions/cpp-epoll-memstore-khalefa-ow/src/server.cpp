@@ -1,7 +1,9 @@
-// The $12 server challenge API with an app-specific in-memory store instead of SQLite.
+// The $12 server challenge API with an app-specific in-memory store. THIS SERVER DOES NOT USE
+// SQLITE: it never opens $SQLITE_PATH and doesn't link SQLite. bin/import (src/import.cpp) converts
+// the seed feed.db into the store's snapshot once, before this server starts.
 //
-// EXPERIMENT, NOT A VALID ENTRY: it breaks rule 2 (the database is SQLite) and rule 5 (no
-// in-memory copies of tables). It measures how much of the per-request cost is SQLite.
+// Not a valid entry: it breaks rule 2 (the database is SQLite) and rule 5 (no in-memory copies of
+// tables). It measures how much of the per-request cost is SQLite.
 //
 // Same HTTP server as cpp-epoll v2: one epoll event loop on one thread. The data lives in memory in
 // the layout the endpoints need (see store.hpp); every write is appended to a WAL, one write() per
@@ -11,7 +13,8 @@
 // Durability matches SQLite's WAL mode with synchronous=NORMAL: a commit survives a process crash
 // at once and reaches the disk with the OS's writeback; the WAL is synced before a snapshot takes it
 // over (SQLite: before a checkpoint), so a power loss can drop the last commits but never corrupts
-// the store. WAL_SYNC=full fdatasyncs every batch, like synchronous=FULL.
+// the store. WAL_SYNC=full makes every acknowledged write durable, like synchronous=FULL, with group
+// commit on a sync thread: a write's response waits for its fdatasync, but the loop doesn't.
 #include <arpa/inet.h>
 #include <dirent.h>
 #include <fcntl.h>
@@ -22,10 +25,12 @@
 #include <signal.h>
 #include <sys/epoll.h>
 #include <sys/resource.h>
+#include <sys/eventfd.h>
 #include <sys/socket.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
+#include <atomic>
 #include <cerrno>
 #include <charconv>
 #include <cmath>
@@ -34,8 +39,10 @@
 #include <cstdlib>
 #include <cstring>
 #include <ctime>
+#include <mutex>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <vector>
 
 #include "store.hpp"
@@ -646,7 +653,38 @@ void load_store() {
   open_wal(last + 1);
 }
 
-// Writes the batch's records. The responses of the batch are sent only after this returns.
+// WAL_SYNC=full uses group commit on a sync thread, so the loop never waits for the disk. The loop
+// write()s each batch's records and moves on; the thread fdatasyncs everything written so far, so
+// the commits that arrive during one sync all share the next one. Only the responses of connections
+// that wrote wait for their sync (Conn::held); reads are sent at once.
+std::atomic<uint64_t> g_sync_target{0};  // WAL bytes written, counted across files: the thread's goal
+std::atomic<uint64_t> g_synced{0};       // WAL bytes known to be on disk
+uint64_t g_written = 0;                  // WAL bytes written (loop only)
+std::mutex g_wal_fd_mu;                  // a sync in progress vs. the loop switching WAL files
+int g_wake_efd = -1;                     // loop -> thread: there is more to sync
+int g_done_efd = -1;                     // thread -> loop (in epoll): g_synced moved
+
+void sync_thread() {
+  for (;;) {
+    uint64_t v;
+    if (read(g_wake_efd, &v, sizeof v) < 0 && errno != EINTR) die("eventfd read failed", strerror(errno));
+    for (;;) {
+      // All bytes up to t were written before t was published, so this fdatasync covers them.
+      uint64_t t = g_sync_target.load(std::memory_order_acquire);
+      if (t <= g_synced.load(std::memory_order_relaxed)) break;
+      {
+        std::lock_guard<std::mutex> lock(g_wal_fd_mu);
+        if (fdatasync(g_wal_fd) != 0) die("WAL fdatasync failed", strerror(errno));
+      }
+      g_synced.store(t, std::memory_order_release);
+      uint64_t one = 1;
+      if (write(g_done_efd, &one, sizeof one) < 0) die("eventfd write failed", strerror(errno));
+    }
+  }
+}
+
+// Writes the batch's records. The responses of the batch are sent only after this returns (and,
+// with WAL_SYNC=full, those of connections that wrote only after their sync).
 void wal_commit() {
   if (g_walbuf.empty()) return;
   const char* p = g_walbuf.data();
@@ -660,9 +698,14 @@ void wal_commit() {
     p += w;
     n -= w;
   }
-  if (g_sync_full && fdatasync(g_wal_fd) != 0) die("WAL fdatasync failed", strerror(errno));
   g_wal_bytes += g_walbuf.size();
+  g_written += g_walbuf.size();
   g_walbuf.clear();
+  if (g_sync_full) {
+    g_sync_target.store(g_written, std::memory_order_release);
+    uint64_t one = 1;
+    if (write(g_wake_efd, &one, sizeof one) < 0) die("eventfd write failed", strerror(errno));
+  }
 }
 
 // Starts a snapshot once the WAL is big enough, and deletes the WAL files it covers once it is done.
@@ -688,9 +731,12 @@ void snapshot_step() {
   // Everything committed so far is in WAL files < the new one: exactly what the child will write.
   // Sync the old file first (SQLite syncs the WAL before a checkpoint), so a power loss can't keep
   // commits of the new file while losing earlier ones.
-  if (fdatasync(g_wal_fd) != 0) die("WAL fdatasync failed", strerror(errno));
-  close(g_wal_fd);
-  open_wal(g_wal_seq + 1);
+  {
+    std::lock_guard<std::mutex> lock(g_wal_fd_mu);  // waits for a sync of the old file to finish
+    if (fdatasync(g_wal_fd) != 0) die("WAL fdatasync failed", strerror(errno));
+    close(g_wal_fd);
+    open_wal(g_wal_seq + 1);
+  }
   pid_t pid = fork();
   if (pid < 0) {
     std::fprintf(stderr, "fork failed: %s\n", strerror(errno));
@@ -1042,6 +1088,10 @@ struct Conn {
   int64_t last_active = 0;
   std::string in;   // a partial request; empty almost always
   std::string out;  // unsent response bytes; empty almost always
+  // WAL_SYNC=full: responses waiting until the WAL is synced up to held_until. Once a connection
+  // has some, all its later responses queue behind them, so its responses stay in order.
+  std::string held;
+  uint64_t held_until = 0;
 };
 
 // The responses of one batch wait in g_out until the batch's WAL records are written, so no client
@@ -1049,6 +1099,7 @@ struct Conn {
 struct Pending {
   Conn* c;
   size_t off, len;
+  bool wrote;  // the connection's requests in this batch wrote WAL records
 };
 
 int g_epoll;
@@ -1056,11 +1107,14 @@ std::vector<Conn*> g_conns;  // indexed by fd
 char g_rbuf[kReadChunk];
 std::string g_out;              // every response of the current batch
 std::vector<Pending> g_pending;  // one entry per connection that has responses in g_out
+std::vector<Conn*> g_held;      // connections with held responses
+std::string g_release;          // a connection's held responses being sent
 std::string g_body;             // the response body being built
 std::string g_chunked;          // decoded chunked request body
 int64_t g_now;
 
 void close_conn(Conn* c) {
+  if (!c->held.empty()) g_held.erase(std::find(g_held.begin(), g_held.end(), c));
   epoll_ctl(g_epoll, EPOLL_CTL_DEL, c->fd, nullptr);
   close(c->fd);
   g_conns[c->fd] = nullptr;
@@ -1073,7 +1127,9 @@ void set_events(Conn* c, bool want_write) {
   epoll_event ev{};
   ev.events = want_write ? EPOLLOUT : EPOLLIN | EPOLLRDHUP;
   ev.data.fd = c->fd;
-  epoll_ctl(g_epoll, EPOLL_CTL_MOD, c->fd, &ev);
+  // ENOENT: on_readable took a half-closed connection out of epoll while it had held responses.
+  if (epoll_ctl(g_epoll, EPOLL_CTL_MOD, c->fd, &ev) != 0 && errno == ENOENT)
+    epoll_ctl(g_epoll, EPOLL_CTL_ADD, c->fd, &ev);
 }
 
 // Sends `data`; keeps whatever the socket won't take in c->out and waits for EPOLLOUT.
@@ -1110,7 +1166,7 @@ bool send_or_queue(Conn* c, const char* data, size_t len) {
 
 // Serves every complete request in [data, data+len) into g_out. Returns the bytes consumed.
 size_t serve(Conn* c, const char* data, size_t len) {
-  size_t start = g_out.size(), off = 0;
+  size_t start = g_out.size(), wal_start = g_walbuf.size(), off = 0;
   Request req;
   while (off < len && !c->close_after) {
     size_t used = 0;
@@ -1131,7 +1187,7 @@ size_t serve(Conn* c, const char* data, size_t len) {
     append_response(g_out, status, g_body, c->close_after);
     off += used;
   }
-  if (g_out.size() > start) g_pending.push_back({c, start, g_out.size() - start});
+  if (g_out.size() > start) g_pending.push_back({c, start, g_out.size() - start, g_walbuf.size() > wal_start});
   return off;
 }
 
@@ -1141,6 +1197,13 @@ void on_readable(Conn* c) {
   ssize_t n = recv(c->fd, g_rbuf, sizeof g_rbuf, 0);
   if (n <= 0) {
     if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR)) return;
+    if (n == 0 && !c->held.empty()) {
+      // The client finished sending but still gets its held responses: stop reading, and close
+      // once they are sent.
+      c->close_after = true;
+      epoll_ctl(g_epoll, EPOLL_CTL_DEL, c->fd, nullptr);
+      return;
+    }
     close_conn(c);
     return;
   }
@@ -1169,13 +1232,42 @@ void on_writable(Conn* c) {
   }
 }
 
-// End of a batch: one WAL write for all its writes (plus fdatasync with WAL_SYNC=full), then all
-// its responses.
+// End of a batch: one WAL write for all its writes, then all its responses. With WAL_SYNC=full, the
+// responses of connections that wrote are held until the sync thread has synced their records.
 void commit_batch() {
   wal_commit();
-  for (const Pending& p : g_pending) send_or_queue(p.c, g_out.data() + p.off, p.len);
+  for (const Pending& p : g_pending) {
+    Conn* c = p.c;
+    if (g_sync_full && (p.wrote || !c->held.empty())) {
+      if (c->held.empty()) g_held.push_back(c);
+      c->held.append(g_out.data() + p.off, p.len);
+      c->held_until = g_written;
+    } else {
+      send_or_queue(c, g_out.data() + p.off, p.len);
+    }
+  }
   g_pending.clear();
   g_out.clear();
+}
+
+// The sync thread moved g_synced: send the held responses it covers.
+void release_synced() {
+  uint64_t v;
+  if (read(g_done_efd, &v, sizeof v) < 0) return;  // EAGAIN: already handled
+  uint64_t synced = g_synced.load(std::memory_order_acquire);
+  size_t keep = 0;
+  for (size_t i = 0; i < g_held.size(); i++) {
+    Conn* c = g_held[i];
+    if (c->held_until > synced) {
+      g_held[keep++] = c;
+      continue;
+    }
+    g_release.clear();
+    g_release.swap(c->held);  // c->held is now empty, so close_conn won't touch g_held
+    if (!c->out.empty()) c->out.append(g_release);  // already waiting for EPOLLOUT
+    else send_or_queue(c, g_release.data(), g_release.size());
+  }
+  g_held.resize(keep);
 }
 
 // Accepts up to 64 pending connections. During a ramp-up thousands can be queued, and accepting
@@ -1262,6 +1354,16 @@ int main() {
   lev.events = EPOLLIN;
   lev.data.fd = lfd;
   epoll_ctl(g_epoll, EPOLL_CTL_ADD, lfd, &lev);
+  if (g_sync_full) {
+    g_wake_efd = eventfd(0, EFD_CLOEXEC);
+    g_done_efd = eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK);
+    if (g_wake_efd < 0 || g_done_efd < 0) die("eventfd", strerror(errno));
+    epoll_event dev{};
+    dev.events = EPOLLIN;
+    dev.data.fd = g_done_efd;
+    epoll_ctl(g_epoll, EPOLL_CTL_ADD, g_done_efd, &dev);
+    std::thread(sync_thread).detach();
+  }
   g_conns.resize(4096, nullptr);
   g_out.reserve(256 * 1024);
   g_body.reserve(16 * 1024);
@@ -1277,6 +1379,10 @@ int main() {
       int fd = events[i].data.fd;
       if (fd == lfd) {
         accept_some(lfd);
+        continue;
+      }
+      if (fd == g_done_efd) {
+        release_synced();
         continue;
       }
       Conn* c = g_conns[fd];
