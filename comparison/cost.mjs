@@ -10,8 +10,14 @@ const cpu = () => { const f = fs.readFileSync(`/proc/${pid}/stat`, 'utf8').split
 const agent = new http.Agent({ keepAlive: true, maxSockets: 200 });
 let done = 0, errs = 0, likeUser = 0;
 const end = Date.now() + 8000;
+// HOT=1: post/like ids come from the current /feed (refreshed every 50 ms) instead of 1..500000.
+let hot = [];
+const refresh = () => new Promise(res => http.get({ host: '127.0.0.1', port: PORT, path: '/feed' }, r => {
+  let b = ''; r.on('data', d => b += d); r.on('end', () => { try { hot = JSON.parse(b).posts.map(p => p.id); } catch {} res(); });
+}).on('error', res));
+if (process.env.HOT) { await refresh(); setInterval(refresh, 50).unref(); }
 function opts() {
-  const id = 1 + Math.floor(Math.random() * 500000);
+  const id = process.env.HOT ? hot[Math.floor(Math.random() * hot.length)] : 1 + Math.floor(Math.random() * 500000);
   let m = mode;
   if (m === 'mix') { // bench/load.js ratios per loop: feed 1, post 1, like 0.15, create 0.02
     const r = Math.random() * 2.17;

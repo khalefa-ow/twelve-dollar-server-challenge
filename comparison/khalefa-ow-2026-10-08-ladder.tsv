@@ -1,0 +1,16 @@
+impl	vus	pass	ok	reqs	p50	p95	p99	max	err%	srv_cpu%	rss_mb
+cpp-iouring-khalefa-ow	2500	1	yes	26017	0.47	2.16	7.15	156	0	4.0	39
+cpp-iouring-top20-khalefa-ow	2500	1	yes	25966	0.34	0.72	5.38	290	0	2.5	40
+cpp-epoll-khalefa-ow	2500	1	yes	25887	0.46	5.76	200.6	910	0	4.8	13
+cpp-epoll_inmem-khalefa-ow	2500	1	yes	25823	0.37	0.67	3.46	214	0	2.7	215
+cpp-epoll-memstore-khalefa-ow	2500	1	yes	25971	0.32	0.57	2.5	153	0	1.8	279
+cpp-iouring-top20-khalefa-ow	5000	1	yes	51834	0.31	0.81	11.12	320	0	4.9	61
+cpp-epoll-khalefa-ow	5000	1	yes	51793	0.33	0.92	4.06	43	0	5.1	20
+cpp-epoll_inmem-khalefa-ow	5000	1	yes	51840	0.35	0.73	5.68	127	0	5.2	222
+cpp-epoll-memstore-khalefa-ow	5000	1	yes	51836	0.28	0.52	2.24	24	0	3.1	279
+cpp-iouring-khalefa-ow	5000	1	yes	51867	0.38	0.83	4.42	332	0	5.8	58
+cpp-epoll-khalefa-ow	7500	1	yes	45897	0.33	1.2	192.68	74663	0.41	11.1	23
+cpp-epoll_inmem-khalefa-ow	7500	1	yes	77644	0.35	0.83	8.18	167	0	7.1	224
+cpp-epoll-memstore-khalefa-ow	7500	1	yes	77776	0.27	0.5	2.23	28	0	4.2	277
+cpp-iouring-khalefa-ow	7500	1	yes	77689	0.36	0.76	3.04	77	0	7.6	78
+cpp-iouring-top20-khalefa-ow	7500	1	yes	77921	0.32	0.71	3.42	119	0	6.3	77

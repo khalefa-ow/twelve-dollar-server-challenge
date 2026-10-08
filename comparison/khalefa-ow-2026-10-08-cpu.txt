@@ -1,0 +1,129 @@
+# impl mode pass endpoint ... (comparison/cost.mjs; mode hot = HOT=1); NOSTART = io_uring_setup ENOMEM, retried
+cpp-iouring-khalefa-ow random 1 NOSTART attempt 1
+cpp-iouring-khalefa-ow random 1 NOSTART attempt 2
+cpp-iouring-khalefa-ow random 1 health rps=11028 errs=0 server-cpu=20% per-request: user=2.4us sys=15.5us total=17.9us
+cpp-iouring-khalefa-ow random 1 post   rps=13393 errs=0 server-cpu=42% per-request: user=11.9us sys=19.1us total=31.0us
+cpp-iouring-khalefa-ow random 1 feed   rps=10677 errs=0 server-cpu=62% per-request: user=40.6us sys=17.1us total=57.6us
+cpp-iouring-khalefa-ow random 1 like   rps=10024 errs=0 server-cpu=48% per-request: user=20.8us sys=27.3us total=48.1us
+cpp-iouring-khalefa-ow random 1 create rps=13877 errs=0 server-cpu=63% per-request: user=23.7us sys=21.6us total=45.3us
+cpp-iouring-khalefa-ow random 1 mix    rps=10923 errs=0 server-cpu=44% per-request: user=22.3us sys=18.0us total=40.3us
+cpp-iouring-top20-khalefa-ow random 1 health rps=9272 errs=0 server-cpu=20% per-request: user=2.7us sys=18.7us total=21.4us
+cpp-iouring-top20-khalefa-ow random 1 post   rps=13556 errs=0 server-cpu=41% per-request: user=12.5us sys=17.8us total=30.3us
+cpp-iouring-top20-khalefa-ow random 1 feed   rps=10103 errs=0 server-cpu=20% per-request: user=2.5us sys=16.9us total=19.4us
+cpp-iouring-top20-khalefa-ow random 1 like   rps=10100 errs=0 server-cpu=48% per-request: user=21.8us sys=25.5us total=47.4us
+cpp-iouring-top20-khalefa-ow random 1 create rps=10732 errs=0 server-cpu=48% per-request: user=22.7us sys=21.9us total=44.5us
+cpp-iouring-top20-khalefa-ow random 1 mix    rps=13749 errs=0 server-cpu=42% per-request: user=12.2us sys=18.2us total=30.5us
+cpp-epoll-khalefa-ow random 1 health rps=9433 errs=0 server-cpu=18% per-request: user=2.2us sys=16.5us total=18.8us
+cpp-epoll-khalefa-ow random 1 post   rps=9643 errs=0 server-cpu=29% per-request: user=11.3us sys=18.6us total=29.9us
+cpp-epoll-khalefa-ow random 1 feed   rps=10085 errs=0 server-cpu=58% per-request: user=41.5us sys=16.5us total=57.9us
+cpp-epoll-khalefa-ow random 1 like   rps=9780 errs=0 server-cpu=51% per-request: user=21.0us sys=31.6us total=52.6us
+cpp-epoll-khalefa-ow random 1 create rps=18221 errs=0 server-cpu=74% per-request: user=19.3us sys=21.5us total=40.8us
+cpp-epoll-khalefa-ow random 1 mix    rps=9006 errs=0 server-cpu=44% per-request: user=27.8us sys=21.3us total=49.2us
+cpp-epoll_inmem-khalefa-ow random 1 health rps=10102 errs=0 server-cpu=18% per-request: user=2.8us sys=14.6us total=17.4us
+cpp-epoll_inmem-khalefa-ow random 1 post   rps=13533 errs=0 server-cpu=34% per-request: user=10.7us sys=14.7us total=25.4us
+cpp-epoll_inmem-khalefa-ow random 1 feed   rps=10350 errs=0 server-cpu=52% per-request: user=37.0us sys=13.3us total=50.3us
+cpp-epoll_inmem-khalefa-ow random 1 like   rps=11360 errs=0 server-cpu=47% per-request: user=15.9us sys=25.8us total=41.7us
+cpp-epoll_inmem-khalefa-ow random 1 create rps=12260 errs=0 server-cpu=42% per-request: user=12.6us sys=21.8us total=34.4us
+cpp-epoll_inmem-khalefa-ow random 1 mix    rps=14169 errs=0 server-cpu=53% per-request: user=22.2us sys=15.5us total=37.7us
+cpp-epoll-memstore-khalefa-ow random 1 health rps=10683 errs=0 server-cpu=17% per-request: user=1.2us sys=14.7us total=15.9us
+cpp-epoll-memstore-khalefa-ow random 1 post   rps=10858 errs=0 server-cpu=18% per-request: user=2.9us sys=13.7us total=16.6us
+cpp-epoll-memstore-khalefa-ow random 1 feed   rps=14242 errs=0 server-cpu=25% per-request: user=2.8us sys=14.8us total=17.6us
+cpp-epoll-memstore-khalefa-ow random 1 like   rps=11024 errs=0 server-cpu=22% per-request: user=5.2us sys=14.7us total=19.9us
+cpp-epoll-memstore-khalefa-ow random 1 create rps=8878 errs=0 server-cpu=23% per-request: user=6.3us sys=19.3us total=25.6us
+cpp-epoll-memstore-khalefa-ow random 1 mix    rps=13438 errs=0 server-cpu=27% per-request: user=4.3us sys=15.9us total=20.1us
+cpp-iouring-top20-khalefa-ow hot 1 health rps=7718 errs=0 server-cpu=20% per-request: user=4.2us sys=22.0us total=26.3us
+cpp-iouring-top20-khalefa-ow hot 1 post   rps=6704 errs=0 server-cpu=29% per-request: user=13.8us sys=29.1us total=42.9us
+cpp-iouring-top20-khalefa-ow hot 1 feed   rps=8594 errs=0 server-cpu=20% per-request: user=2.2us sys=20.6us total=22.8us
+cpp-iouring-top20-khalefa-ow hot 1 like   rps=4478 errs=0 server-cpu=52% per-request: user=49.3us sys=66.0us total=115.2us
+cpp-iouring-top20-khalefa-ow hot 1 create rps=8351 errs=0 server-cpu=43% per-request: user=26.2us sys=25.9us total=52.0us
+cpp-iouring-top20-khalefa-ow hot 1 mix    rps=9601 errs=0 server-cpu=31% per-request: user=10.9us sys=21.0us total=31.9us
+cpp-epoll-khalefa-ow hot 1 health rps=13494 errs=0 server-cpu=23% per-request: user=2.7us sys=14.5us total=17.2us
+cpp-epoll-khalefa-ow hot 1 post   rps=9243 errs=0 server-cpu=27% per-request: user=10.7us sys=18.4us total=29.1us
+cpp-epoll-khalefa-ow hot 1 feed   rps=9017 errs=0 server-cpu=56% per-request: user=43.7us sys=17.9us total=61.6us
+cpp-epoll-khalefa-ow hot 1 like   rps=12837 errs=0 server-cpu=50% per-request: user=16.1us sys=22.9us total=39.1us
+cpp-epoll-khalefa-ow hot 1 create rps=11522 errs=0 server-cpu=66% per-request: user=26.0us sys=30.9us total=57.0us
+cpp-epoll-khalefa-ow hot 1 mix    rps=8602 errs=0 server-cpu=43% per-request: user=28.9us sys=20.5us total=49.4us
+cpp-epoll_inmem-khalefa-ow hot 1 health rps=10382 errs=0 server-cpu=17% per-request: user=2.4us sys=14.1us total=16.5us
+cpp-epoll_inmem-khalefa-ow hot 1 post   rps=13114 errs=0 server-cpu=32% per-request: user=7.5us sys=17.2us total=24.8us
+cpp-epoll_inmem-khalefa-ow hot 1 feed   rps=9131 errs=0 server-cpu=51% per-request: user=38.5us sys=17.0us total=55.5us
+cpp-epoll_inmem-khalefa-ow hot 1 like   rps=11856 errs=0 server-cpu=34% per-request: user=12.9us sys=16.2us total=29.1us
+cpp-epoll_inmem-khalefa-ow hot 1 create rps=6932 errs=0 server-cpu=19% per-request: user=10.4us sys=16.8us total=27.1us
+cpp-epoll_inmem-khalefa-ow hot 1 mix    rps=9498 errs=0 server-cpu=33% per-request: user=20.9us sys=13.5us total=34.4us
+cpp-epoll-memstore-khalefa-ow hot 1 health rps=8251 errs=0 server-cpu=17% per-request: user=2.1us sys=18.7us total=20.8us
+cpp-epoll-memstore-khalefa-ow hot 1 post   rps=11653 errs=0 server-cpu=23% per-request: user=2.5us sys=17.5us total=20.0us
+cpp-epoll-memstore-khalefa-ow hot 1 feed   rps=9992 errs=0 server-cpu=18% per-request: user=2.8us sys=15.5us total=18.3us
+cpp-epoll-memstore-khalefa-ow hot 1 like   rps=8488 errs=0 server-cpu=23% per-request: user=7.2us sys=20.1us total=27.3us
+cpp-epoll-memstore-khalefa-ow hot 1 create rps=11553 errs=0 server-cpu=30% per-request: user=7.0us sys=18.6us total=25.7us
+cpp-epoll-memstore-khalefa-ow hot 1 mix    rps=10163 errs=0 server-cpu=19% per-request: user=3.1us sys=15.2us total=18.3us
+cpp-iouring-khalefa-ow hot 1 NOSTART attempt 1
+cpp-iouring-khalefa-ow hot 1 NOSTART attempt 2
+cpp-iouring-khalefa-ow hot 1 health rps=8467 errs=0 server-cpu=22% per-request: user=3.1us sys=22.8us total=25.9us
+cpp-iouring-khalefa-ow hot 1 post   rps=11932 errs=0 server-cpu=38% per-request: user=11.7us sys=20.4us total=32.2us
+cpp-iouring-khalefa-ow hot 1 feed   rps=8754 errs=0 server-cpu=62% per-request: user=52.1us sys=19.1us total=71.3us
+cpp-iouring-khalefa-ow hot 1 like   rps=12870 errs=0 server-cpu=47% per-request: user=18.2us sys=18.2us total=36.3us
+cpp-iouring-khalefa-ow hot 1 create rps=15320 errs=0 server-cpu=61% per-request: user=19.8us sys=20.1us total=39.9us
+cpp-iouring-khalefa-ow hot 1 mix    rps=10817 errs=0 server-cpu=44% per-request: user=24.3us sys=16.2us total=40.4us
+cpp-epoll-khalefa-ow random 2 health rps=11410 errs=0 server-cpu=17% per-request: user=2.4us sys=12.4us total=14.8us
+cpp-epoll-khalefa-ow random 2 post   rps=10733 errs=0 server-cpu=28% per-request: user=10.9us sys=15.2us total=26.2us
+cpp-epoll-khalefa-ow random 2 feed   rps=14872 errs=0 server-cpu=78% per-request: user=37.5us sys=15.2us total=52.6us
+cpp-epoll-khalefa-ow random 2 like   rps=10673 errs=0 server-cpu=52% per-request: user=19.4us sys=29.4us total=48.8us
+cpp-epoll-khalefa-ow random 2 create rps=12875 errs=0 server-cpu=50% per-request: user=18.5us sys=20.3us total=38.8us
+cpp-epoll-khalefa-ow random 2 mix    rps=15418 errs=0 server-cpu=58% per-request: user=20.8us sys=16.8us total=37.6us
+cpp-epoll_inmem-khalefa-ow random 2 health rps=11597 errs=0 server-cpu=17% per-request: user=2.0us sys=12.7us total=14.7us
+cpp-epoll_inmem-khalefa-ow random 2 post   rps=10961 errs=0 server-cpu=26% per-request: user=9.3us sys=14.0us total=23.3us
+cpp-epoll_inmem-khalefa-ow random 2 feed   rps=10806 errs=0 server-cpu=52% per-request: user=34.0us sys=14.3us total=48.3us
+cpp-epoll_inmem-khalefa-ow random 2 like   rps=16210 errs=0 server-cpu=66% per-request: user=14.4us sys=26.1us total=40.5us
+cpp-epoll_inmem-khalefa-ow random 2 create rps=13558 errs=0 server-cpu=43% per-request: user=13.2us sys=18.6us total=31.8us
+cpp-epoll_inmem-khalefa-ow random 2 mix    rps=11078 errs=0 server-cpu=38% per-request: user=19.5us sys=14.5us total=34.0us
+cpp-epoll-memstore-khalefa-ow random 2 health rps=14637 errs=0 server-cpu=23% per-request: user=2.0us sys=13.6us total=15.6us
+cpp-epoll-memstore-khalefa-ow random 2 post   rps=11008 errs=0 server-cpu=18% per-request: user=2.7us sys=14.0us total=16.8us
+cpp-epoll-memstore-khalefa-ow random 2 feed   rps=8554 errs=0 server-cpu=19% per-request: user=3.8us sys=18.5us total=22.3us
+cpp-epoll-memstore-khalefa-ow random 2 like   rps=10803 errs=0 server-cpu=22% per-request: user=5.9us sys=14.6us total=20.5us
+cpp-epoll-memstore-khalefa-ow random 2 create rps=13356 errs=0 server-cpu=28% per-request: user=5.8us sys=15.5us total=21.3us
+cpp-epoll-memstore-khalefa-ow random 2 mix    rps=10920 errs=0 server-cpu=19% per-request: user=2.7us sys=14.6us total=17.4us
+cpp-iouring-khalefa-ow random 2 health rps=11235 errs=0 server-cpu=19% per-request: user=2.3us sys=14.7us total=17.0us
+cpp-iouring-khalefa-ow random 2 post   rps=11605 errs=0 server-cpu=43% per-request: user=13.4us sys=23.3us total=36.8us
+cpp-iouring-khalefa-ow random 2 feed   rps=10007 errs=0 server-cpu=61% per-request: user=43.6us sys=17.3us total=61.0us
+cpp-iouring-khalefa-ow random 2 like   rps=9842 errs=0 server-cpu=49% per-request: user=21.3us sys=28.3us total=49.6us
+cpp-iouring-khalefa-ow random 2 create rps=11076 errs=0 server-cpu=46% per-request: user=21.8us sys=20.0us total=41.9us
+cpp-iouring-khalefa-ow random 2 mix    rps=11796 errs=0 server-cpu=62% per-request: user=29.2us sys=23.3us total=52.6us
+cpp-iouring-top20-khalefa-ow random 2 NOSTART attempt 1
+cpp-iouring-top20-khalefa-ow random 2 NOSTART attempt 2
+cpp-iouring-top20-khalefa-ow random 2 NOSTART attempt 3
+cpp-iouring-top20-khalefa-ow random 2 NOSTART attempt 4
+cpp-iouring-top20-khalefa-ow random 2 NOSTART attempt 5
+cpp-iouring-top20-khalefa-ow random 2 NOSTART attempt 6
+cpp-epoll_inmem-khalefa-ow hot 2 health rps=10537 errs=0 server-cpu=17% per-request: user=1.9us sys=14.4us total=16.3us
+cpp-epoll_inmem-khalefa-ow hot 2 post   rps=13665 errs=0 server-cpu=32% per-request: user=7.9us sys=15.6us total=23.5us
+cpp-epoll_inmem-khalefa-ow hot 2 feed   rps=10359 errs=0 server-cpu=52% per-request: user=35.0us sys=15.1us total=50.1us
+cpp-epoll_inmem-khalefa-ow hot 2 like   rps=9852 errs=0 server-cpu=31% per-request: user=15.1us sys=16.3us total=31.4us
+cpp-epoll_inmem-khalefa-ow hot 2 create rps=4665 errs=0 server-cpu=12% per-request: user=11.5us sys=15.0us total=26.5us
+cpp-epoll_inmem-khalefa-ow hot 2 mix    rps=13071 errs=0 server-cpu=50% per-request: user=25.5us sys=13.0us total=38.4us
+cpp-epoll-memstore-khalefa-ow hot 2 health rps=9381 errs=0 server-cpu=17% per-request: user=1.9us sys=16.0us total=17.9us
+cpp-epoll-memstore-khalefa-ow hot 2 post   rps=7971 errs=0 server-cpu=19% per-request: user=3.1us sys=20.4us total=23.5us
+cpp-epoll-memstore-khalefa-ow hot 2 feed   rps=11569 errs=0 server-cpu=26% per-request: user=3.3us sys=18.8us total=22.1us
+cpp-epoll-memstore-khalefa-ow hot 2 like   rps=9009 errs=0 server-cpu=22% per-request: user=6.9us sys=17.9us total=24.8us
+cpp-epoll-memstore-khalefa-ow hot 2 create rps=5662 errs=0 server-cpu=24% per-request: user=11.3us sys=30.7us total=41.9us
+cpp-epoll-memstore-khalefa-ow hot 2 mix    rps=8372 errs=0 server-cpu=19% per-request: user=4.3us sys=18.8us total=23.2us
+cpp-iouring-khalefa-ow hot 2 NOSTART attempt 1
+cpp-iouring-khalefa-ow hot 2 NOSTART attempt 2
+cpp-iouring-khalefa-ow hot 2 NOSTART attempt 3
+cpp-iouring-khalefa-ow hot 2 health rps=9726 errs=0 server-cpu=21% per-request: user=3.2us sys=17.9us total=21.1us
+cpp-iouring-khalefa-ow hot 2 post   rps=15839 errs=0 server-cpu=42% per-request: user=9.8us sys=16.8us total=26.6us
+cpp-iouring-khalefa-ow hot 2 feed   rps=9584 errs=0 server-cpu=60% per-request: user=45.4us sys=17.6us total=63.0us
+cpp-iouring-khalefa-ow hot 2 like   rps=10117 errs=0 server-cpu=46% per-request: user=22.7us sys=23.0us total=45.7us
+cpp-iouring-khalefa-ow hot 2 create rps=5007 errs=0 server-cpu=56% per-request: user=54.1us sys=56.9us total=111.0us
+cpp-iouring-khalefa-ow hot 2 mix    rps=1691 errs=0 server-cpu=34% per-request: user=98.1us sys=102.6us total=200.7us
+cpp-iouring-top20-khalefa-ow hot 2 health rps=2376 errs=0 server-cpu=23% per-request: user=6.4us sys=90.6us total=96.9us
+cpp-iouring-top20-khalefa-ow hot 2 post   rps=5539 errs=0 server-cpu=38% per-request: user=24.5us sys=43.5us total=67.9us
+cpp-iouring-top20-khalefa-ow hot 2 feed   rps=5619 errs=0 server-cpu=20% per-request: user=4.9us sys=31.2us total=36.1us
+cpp-iouring-top20-khalefa-ow hot 2 like   rps=9380 errs=0 server-cpu=47% per-request: user=25.9us sys=24.4us total=50.3us
+cpp-iouring-top20-khalefa-ow hot 2 create rps=7527 errs=0 server-cpu=45% per-request: user=30.9us sys=29.4us total=60.3us
+cpp-iouring-top20-khalefa-ow hot 2 mix    rps=11915 errs=0 server-cpu=44% per-request: user=14.3us sys=22.4us total=36.6us
+cpp-epoll-khalefa-ow hot 2 health rps=7610 errs=0 server-cpu=19% per-request: user=4.8us sys=19.9us total=24.6us
+cpp-epoll-khalefa-ow hot 2 post   rps=7936 errs=0 server-cpu=27% per-request: user=11.2us sys=22.9us total=34.1us
+cpp-epoll-khalefa-ow hot 2 feed   rps=9953 errs=0 server-cpu=79% per-request: user=55.8us sys=23.4us total=79.2us
+cpp-epoll-khalefa-ow hot 2 like   rps=10244 errs=0 server-cpu=51% per-request: user=21.1us sys=28.5us total=49.5us
+cpp-epoll-khalefa-ow hot 2 create rps=10268 errs=0 server-cpu=48% per-request: user=20.5us sys=26.3us total=46.8us
+cpp-epoll-khalefa-ow hot 2 mix    rps=9703 errs=0 server-cpu=45% per-request: user=26.3us sys=19.6us total=45.9us
+ALLDONE
