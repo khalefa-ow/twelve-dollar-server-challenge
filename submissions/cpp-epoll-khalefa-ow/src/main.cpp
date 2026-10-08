@@ -1185,8 +1185,8 @@ int main() {
   const char* port = std::getenv("PORT");
   if (!path || !*path) die("SQLITE_PATH is not set");
   if (!secret) die("JWT_SECRET is not set");
-  if (!host || !*host) host = "127.0.0.1";
-  if (!port || !*port) port = "3000";
+  if (!host || !*host) host = "0.0.0.0";  // direct, no Nginx (README)
+  if (!port || !*port) port = "80";
 
   signal(SIGPIPE, SIG_IGN);
   rlimit rl;

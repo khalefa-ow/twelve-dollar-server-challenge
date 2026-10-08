@@ -9,8 +9,8 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 const SQLITE_PATH = process.env.SQLITE_PATH;
 const JWT_SECRET = process.env.JWT_SECRET;
 if (!SQLITE_PATH || JWT_SECRET === undefined) throw new Error("SQLITE_PATH and JWT_SECRET must be set");
-const HOST = process.env.HOST || "127.0.0.1";
-const PORT = Number(process.env.PORT || 3000);
+const HOST = process.env.HOST || "0.0.0.0"; // direct, no Nginx (README)
+const PORT = Number(process.env.PORT || 80);
 const START = performance.now();
 
 // --- database ---------------------------------------------------------------------------------

@@ -18,7 +18,7 @@
 | SQLite | **Only in `bin/import`**, a one-time `feed.db` → snapshot converter run by `start.sh`. `bin/server` doesn't link it |
 | Crypto | OpenSSL `libcrypto` (Ubuntu's `libssl-dev`) for SHA-256 |
 | JSON | hand-written strict RFC 8259 parser and writer |
-| Nginx or direct | **Direct**: serves `HOST:PORT` itself |
+| Nginx or direct | **Direct**: serves `0.0.0.0:80` itself (it works behind Nginx on `127.0.0.1:3000` too) |
 
 The HTTP server, JWT check and JSON parser are the same code as the SQLite version. Only the data
 layer changed: SQLite is replaced by a store that holds the data in memory, laid out for these five

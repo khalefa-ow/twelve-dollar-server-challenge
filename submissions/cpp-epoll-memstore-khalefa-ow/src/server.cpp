@@ -1323,8 +1323,8 @@ int main() {
   const char* snap_mb = std::getenv("SNAPSHOT_WAL_MB");
   if (!path || !*path) die("SQLITE_PATH is not set");
   if (!secret) die("JWT_SECRET is not set");
-  if (!host || !*host) host = "127.0.0.1";
-  if (!port || !*port) port = "3000";
+  if (!host || !*host) host = "0.0.0.0";  // direct, no Nginx (README)
+  if (!port || !*port) port = "80";
   g_dir = dir && *dir ? dir : std::string(path) + ".memstore";
   g_sync_full = sync && std::strcmp(sync, "full") == 0;
   g_snapshot_every = static_cast<uint64_t>(snap_mb && *snap_mb ? std::atof(snap_mb) : 64) << 20;

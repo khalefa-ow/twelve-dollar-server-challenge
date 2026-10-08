@@ -585,6 +585,9 @@ sqlite3_stmt* g_st_post;
 sqlite3_stmt* g_st_insert_post;
 sqlite3_stmt* g_st_insert_like;
 sqlite3_stmt* g_st_post_exists;
+#ifdef CHALLENGE_CACHE_FEED
+std::string g_feed_cache;
+#endif
 
 #define POST_SELECT                                                       \
   "SELECT p.id, p.body, p.created_at, u.username,"                        \
@@ -675,6 +678,12 @@ int handle_health(std::string& b) {
 }
 
 int handle_feed(std::string& b) {
+#ifdef CHALLENGE_CACHE_FEED
+  if (!g_feed_cache.empty()) {
+    b.append(g_feed_cache);
+    return 200;
+  }
+#endif
   b.append("{\"posts\":[");
   int rc;
   bool first = true;
@@ -689,6 +698,9 @@ int handle_feed(std::string& b) {
     return error(b, 500, "internal server error");
   }
   b.append("]}");
+#ifdef CHALLENGE_CACHE_FEED
+  g_feed_cache = b;
+#endif
   return 200;
 }
 

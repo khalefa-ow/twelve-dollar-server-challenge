@@ -90,6 +90,11 @@ class GroupCommit {
       ++failures;
       return false;
     }
+#ifdef CHALLENGE_CACHE_FEED
+    // Feed contains exactly the latest 20 posts and their live like counts. Any committed
+    // mutation can affect either membership or ordering, so rebuild lazily on the next read.
+    g_feed_cache.clear();
+#endif
     ++batches;
     requests += writes.size();
     if (writes.size() > largest) largest = writes.size();
