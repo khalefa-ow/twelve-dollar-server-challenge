@@ -1,0 +1,4 @@
+bin/
+vendor/
+__pycache__/
+data/
