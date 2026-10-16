@@ -964,16 +964,7 @@ int main(int argc, char **argv)
     rl.rlim_cur = rl.rlim_max;
     setrlimit(RLIMIT_NOFILE, &rl);
     getrlimit(RLIMIT_NOFILE, &rl);
-    {
-        /* bench fork: MAXCONN lifts the default 64k connection cap so
-         * load tests can push past it. default behavior is unchanged. */
-        rlim_t cap = 65535;
-        const char *mc = getenv("MAXCONN");
-        if (mc && atol(mc) > 0) cap = (rlim_t)atol(mc);
-        if (cap > rl.rlim_cur) cap = rl.rlim_cur;
-        if (cap > 2000000) cap = 2000000;
-        nslots = (int)cap;
-    }
+    nslots = (int)(rl.rlim_cur > 65535 ? 65535 : rl.rlim_cur);
     if (nslots <= ACCEPT_RESUME) {
         fprintf(stderr, "RLIMIT_NOFILE too low (%d)\n", nslots);
         return 1;
