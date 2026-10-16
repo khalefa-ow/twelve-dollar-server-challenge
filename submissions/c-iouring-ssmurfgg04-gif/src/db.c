@@ -1,5 +1,11 @@
-/* db.c - all SQLite work plus the response bodies for it */
+/* db.c - SQLite: one read connection per worker (WAL snapshots), one
+ * writer connection guarded by a short mutex. Reads never block each other
+ * or the event loops; writes run begin..commit inside the mutex (WAL with
+ * synchronous=NORMAL makes commits cheap, so no cross-request grouping is
+ * needed and responses can be sent immediately). */
+#define _GNU_SOURCE
 #include <fcntl.h>
+#include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -13,30 +19,32 @@
 
 #define FEED_SPAN 256
 
-static sqlite3 *db;
-static sqlite3_stmt *st_feed_ids, *st_like_range, *st_feed_rows, *st_feed;
-static sqlite3_stmt *st_post, *st_create, *st_like, *st_exists, *st_ping;
-static sqlite3_stmt *st_begin, *st_commit, *st_rollback;
-static int in_txn;
+static sqlite3 *wdb;                    /* the one writer */
+static pthread_mutex_t write_mu = PTHREAD_MUTEX_INITIALIZER;
+static int wal_frames;                  /* guarded by write_mu */
 static struct timespec start_ts;
-static __thread int wal_frames;
+static sqlite3_stmt *wst_create, *wst_like, *wst_exists; /* on wdb, under write_mu */
 
-static __thread buf_t body; /* scratch for response bodies (one per worker) */
+/* per worker: private read connection + statements, zero locking */
+static __thread sqlite3 *rdb;
+static __thread sqlite3_stmt *st_feed_ids, *st_like_range, *st_feed_rows, *st_feed;
+static __thread sqlite3_stmt *st_post, *st_ping;
+static __thread buf_t body;             /* scratch for response bodies */
 
-static sqlite3_stmt *prep(const char *sql)
+static sqlite3_stmt *prep(sqlite3 *d, const char *sql)
 {
     sqlite3_stmt *s = NULL;
-    if (sqlite3_prepare_v3(db, sql, -1, SQLITE_PREPARE_PERSISTENT, &s, NULL) != SQLITE_OK) {
-        fprintf(stderr, "prepare failed: %s: %s\n", sqlite3_errmsg(db), sql);
+    if (sqlite3_prepare_v3(d, sql, -1, SQLITE_PREPARE_PERSISTENT, &s, NULL) != SQLITE_OK) {
+        fprintf(stderr, "prepare failed: %s: %s\n", sqlite3_errmsg(d), sql);
         exit(1);
     }
     return s;
 }
 
-static void exec_or_die(const char *sql)
+static void exec_or_die(sqlite3 *d, const char *sql)
 {
     char *err = NULL;
-    if (sqlite3_exec(db, sql, NULL, NULL, &err) != SQLITE_OK) {
+    if (sqlite3_exec(d, sql, NULL, NULL, &err) != SQLITE_OK) {
         fprintf(stderr, "%s: %s\n", sql, err ? err : "?");
         exit(1);
     }
@@ -49,47 +57,55 @@ static int wal_hook(void *arg, sqlite3 *d, const char *name, int frames)
     return SQLITE_OK;
 }
 
-void db_open(const char *path)
+void db_thread_init(void)
 {
-    if (sqlite3_open_v2(path, &db, SQLITE_OPEN_READWRITE | SQLITE_OPEN_NOMUTEX, NULL) != SQLITE_OK) {
-        fprintf(stderr, "cannot open %s: %s\n", path, db ? sqlite3_errmsg(db) : "?");
+    if (rdb) return;
+    if (sqlite3_open_v2(sqlite3_db_filename(wdb, "main"), &rdb,
+                        SQLITE_OPEN_READONLY | SQLITE_OPEN_NOMUTEX, NULL) != SQLITE_OK) {
+        fprintf(stderr, "cannot open reader: %s\n", rdb ? sqlite3_errmsg(rdb) : "?");
         exit(1);
     }
-    sqlite3_busy_timeout(db, 5000);
-    /* EXCLUSIVE locking before the first WAL access: the wal-index lives in
-     * heap memory, so read transactions need no fcntl() lock calls. This
-     * process is the database's only user. */
-    exec_or_die(
-        "PRAGMA locking_mode=EXCLUSIVE;"
-        "PRAGMA journal_mode=WAL;"
-        "PRAGMA synchronous=NORMAL;"
-        "PRAGMA mmap_size=0;"
-        "PRAGMA cache_size=-131072;"
-        "PRAGMA temp_store=MEMORY;"
-        "PRAGMA journal_size_limit=67108864;"
-        "PRAGMA wal_autocheckpoint=0;");
-    sqlite3_wal_hook(db, wal_hook, NULL);
+    sqlite3_busy_timeout(rdb, 5000);
+    exec_or_die(rdb, "PRAGMA cache_size=-16384;");
 
-    /* the reference post select */
 #define POST_SELECT                                                       \
     "SELECT p.id, p.body, p.created_at, u.username, "                     \
     "(SELECT count(*) FROM likes l WHERE l.post_id = p.id) "               \
     "FROM posts p JOIN users u ON u.id = p.user_id "
-    st_feed = prep(POST_SELECT "ORDER BY p.created_at DESC, p.id DESC LIMIT 20");
-    st_post = prep(POST_SELECT "WHERE p.id = ?1");
-    st_feed_ids = prep("SELECT id FROM posts ORDER BY created_at DESC, id DESC LIMIT 20");
-    st_like_range = prep("SELECT post_id FROM likes WHERE post_id BETWEEN ?1 AND ?2");
-    st_feed_rows = prep("SELECT p.id, p.body, p.created_at, u.username FROM posts p "
-                        "JOIN users u ON u.id = p.user_id WHERE p.id BETWEEN ?1 AND ?2");
-    st_create = prep("INSERT INTO posts (user_id, body) VALUES (?1, ?2) RETURNING id, created_at");
-    st_like = prep("INSERT INTO likes (user_id, post_id) SELECT ?1, ?2 "
-                   "WHERE EXISTS (SELECT 1 FROM posts WHERE id = ?2) "
-                   "ON CONFLICT (user_id, post_id) DO NOTHING");
-    st_exists = prep("SELECT 1 FROM posts WHERE id = ?1");
-    st_ping = prep("SELECT 1");
-    st_begin = prep("BEGIN IMMEDIATE");
-    st_commit = prep("COMMIT");
-    st_rollback = prep("ROLLBACK");
+    st_feed = prep(rdb, POST_SELECT "ORDER BY p.created_at DESC, p.id DESC LIMIT 20");
+    st_feed_ids = prep(rdb, "SELECT id FROM posts ORDER BY created_at DESC, id DESC LIMIT 20");
+    st_like_range = prep(rdb, "SELECT post_id FROM likes WHERE post_id BETWEEN ?1 AND ?2");
+    st_feed_rows = prep(rdb, "SELECT p.id, p.body, p.created_at, u.username FROM posts p "
+                             "JOIN users u ON u.id = p.user_id WHERE p.id BETWEEN ?1 AND ?2");
+    st_post = prep(rdb, POST_SELECT "WHERE p.id = ?1");
+    st_ping = prep(rdb, "SELECT 1");
+}
+
+void db_open(const char *path)
+{
+    if (sqlite3_open_v2(path, &wdb, SQLITE_OPEN_READWRITE | SQLITE_OPEN_NOMUTEX, NULL) != SQLITE_OK) {
+        fprintf(stderr, "cannot open %s: %s\n", path, wdb ? sqlite3_errmsg(wdb) : "?");
+        exit(1);
+    }
+    sqlite3_busy_timeout(wdb, 5000);
+    /* WAL lets every worker read its own snapshot while the writer runs. */
+    exec_or_die(wdb,
+        "PRAGMA journal_mode=WAL;"
+        "PRAGMA synchronous=NORMAL;"
+        "PRAGMA mmap_size=0;"
+        "PRAGMA cache_size=-65536;"
+        "PRAGMA temp_store=MEMORY;"
+        "PRAGMA journal_size_limit=67108864;"
+        "PRAGMA wal_autocheckpoint=0;");
+    sqlite3_wal_hook(wdb, wal_hook, NULL);
+
+    wst_create = prep(wdb,
+        "INSERT INTO posts (user_id, body) VALUES (?1, ?2) RETURNING id, created_at");
+    wst_like = prep(wdb,
+        "INSERT INTO likes (user_id, post_id) SELECT ?1, ?2 "
+        "WHERE EXISTS (SELECT 1 FROM posts WHERE id = ?2) "
+        "ON CONFLICT (user_id, post_id) DO NOTHING");
+    wst_exists = prep(wdb, "SELECT 1 FROM posts WHERE id = ?1");
 
     clock_gettime(CLOCK_MONOTONIC, &start_ts);
 
@@ -103,43 +119,48 @@ void db_open(const char *path)
 
 void db_close(void)
 {
-    sqlite3_close(db);
-}
-
-int db_txn_begin(void)
-{
-    if (in_txn) return 1;
-    int rc = sqlite3_step(st_begin);
-    sqlite3_reset(st_begin);
-    if (rc != SQLITE_DONE) return 0;
-    in_txn = 1;
-    return 1;
-}
-
-int db_in_txn(void)
-{
-    return in_txn;
-}
-
-int db_commit(void)
-{
-    if (!in_txn) return 1;
-    in_txn = 0;
-    int rc = sqlite3_step(st_commit);
-    sqlite3_reset(st_commit);
-    if (rc != SQLITE_DONE) {
-        sqlite3_step(st_rollback);
-        sqlite3_reset(st_rollback);
-        return 0;
-    }
-    if (wal_frames >= 4000) {
-        sqlite3_wal_checkpoint_v2(db, NULL, SQLITE_CHECKPOINT_PASSIVE, NULL, NULL);
-        wal_frames = 0;
-    }
-    return 1;
+    if (rdb) sqlite3_close(rdb);
+    sqlite3_close(wdb);
 }
 
 /* ---------------------------------------------------------------- writers */
+
+/* Runs fn inside BEGIN IMMEDIATE .. COMMIT on the writer connection while
+ * holding write_mu. fn returns 0 on success; anything else rolls back. */
+static int write_txn(int (*fn)(void *arg), void *arg)
+{
+    int ok = 0;
+    pthread_mutex_lock(&write_mu);
+    for (int attempt = 0; attempt < 20 && !ok; attempt++) {
+        char *err = NULL;
+        if (sqlite3_exec(wdb, "BEGIN IMMEDIATE", NULL, NULL, &err) != SQLITE_OK) {
+            sqlite3_free(err);
+            struct timespec ts = { 0, 2000000 }; /* 2ms */
+            nanosleep(&ts, NULL);
+            continue;
+        }
+        if (fn(arg) == 0) {
+            if (sqlite3_exec(wdb, "COMMIT", NULL, NULL, &err) == SQLITE_OK) {
+                ok = 1;
+            } else {
+                sqlite3_free(err);
+                sqlite3_exec(wdb, "ROLLBACK", NULL, NULL, NULL);
+            }
+        } else {
+            sqlite3_exec(wdb, "ROLLBACK", NULL, NULL, NULL);
+        }
+        if (!ok) {
+            struct timespec ts = { 0, 2000000 };
+            nanosleep(&ts, NULL);
+        }
+    }
+    if (ok && wal_frames >= 4000) {
+        sqlite3_wal_checkpoint_v2(wdb, NULL, SQLITE_CHECKPOINT_PASSIVE, NULL, NULL);
+        wal_frames = 0;
+    }
+    pthread_mutex_unlock(&write_mu);
+    return ok;
+}
 
 /* JS String.prototype.trim whitespace: ASCII, NBSP and the common Zs set */
 static size_t js_trim(const unsigned char **sp, const unsigned char **ep)
@@ -179,6 +200,39 @@ static size_t js_trim(const unsigned char **sp, const unsigned char **ep)
     return (size_t)(e - p);
 }
 
+typedef struct {
+    int64_t uid;
+    char *body_heap;          /* ownership passes to the txn */
+    const char *body;
+    size_t body_len;
+    const char *uname;
+    size_t ulen;
+    /* out */
+    int64_t id;
+    char created[64];
+    int created_len;
+} create_arg_t;
+
+static int create_fn(void *argp)
+{
+    create_arg_t *a = argp;
+    sqlite3_stmt *s = wst_create;
+    sqlite3_bind_int64(s, 1, a->uid);
+    sqlite3_bind_text(s, 2, a->body, (int)a->body_len, SQLITE_STATIC);
+    if (sqlite3_step(s) != SQLITE_ROW) {
+        sqlite3_reset(s);
+        return -1;
+    }
+    a->id = sqlite3_column_int64(s, 0);
+    int n = sqlite3_column_bytes(s, 1);
+    if (n > (int)sizeof a->created - 1) n = (int)sizeof a->created - 1;
+    memcpy(a->created, sqlite3_column_text(s, 1), (size_t)n);
+    a->created_len = n;
+    int rc = sqlite3_step(s);   /* drain to DONE so the row is written */
+    sqlite3_reset(s);
+    return rc == SQLITE_DONE ? 0 : -1;
+}
+
 void h_create(int slot, int64_t uid, const char *uname, size_t ulen,
               const char *b, size_t blen)
 {
@@ -216,77 +270,78 @@ void h_create(int slot, int64_t uid, const char *uname, size_t ulen,
         return;
     }
 
-    if (!db_txn_begin()) {
-        free(heap);
-        srv_err_500(slot);
-        return;
-    }
-    sqlite3_bind_int64(st_create, 1, uid);
-    sqlite3_bind_text(st_create, 2, (const char *)p, (int)len, SQLITE_STATIC);
-    int rc = sqlite3_step(st_create);
-    if (rc != SQLITE_ROW) {
-        sqlite3_reset(st_create);
-        free(heap);
-        srv_err_500(slot);
-        return;
-    }
-    int64_t id = sqlite3_column_int64(st_create, 0);
-    const unsigned char *ca = sqlite3_column_text(st_create, 1);
-    int nca = sqlite3_column_bytes(st_create, 1);
+    create_arg_t a = {
+        .uid = uid,
+        .body = (const char *)p,
+        .body_len = len,
+        .uname = uname,
+        .ulen = ulen,
+    };
+    int ok = write_txn(create_fn, &a);
+    free(heap);
+    if (!ok) { srv_err_500(slot); return; }
 
-    /* build while the RETURNING row is alive */
     body.len = 0;
-    if (buf_reserve(&body, 160 + 6 * (len + ulen + (size_t)nca))) {
-        sqlite3_reset(st_create);
-        free(heap);
+    if (buf_reserve(&body, 160 + 6 * (len + ulen + (size_t)a.created_len))) {
         srv_err_500(slot);
         return;
     }
     char *o = body.p;
     memcpy(o, "{\"post\":{\"id\":", 14); o += 14;
-    o = u64_to(o, (uint64_t)id);
+    o = u64_to(o, (uint64_t)a.id);
     memcpy(o, ",\"body\":\"", 9); o += 9;
-    o = j_escape(o, p, len);
+    o = j_escape(o, (const unsigned char *)a.body, a.body_len);
     memcpy(o, "\",\"created_at\":\"", 16); o += 16;
-    o = j_escape(o, ca, (size_t)nca);
+    o = j_escape(o, (const unsigned char *)a.created, (size_t)a.created_len);
     memcpy(o, "\",\"author\":\"", 12); o += 12;
     o = j_escape(o, (const unsigned char *)uname, ulen);
     memcpy(o, "\",\"like_count\":0}}", 18); o += 18;
-    body.len = (uint32_t)(o - body.p);
+    respond(slot, 201, body.p, (uint32_t)(o - body.p), 0);
+}
 
-    rc = sqlite3_step(st_create); /* finish the statement so the row is written */
-    sqlite3_reset(st_create);
-    free(heap);
-    if (rc != SQLITE_DONE) { srv_err_500(slot); return; }
-    respond(slot, 201, body.p, body.len, 0);
+typedef struct {
+    int64_t uid;
+    int64_t pid;
+    int inserted;      /* 1 = new like, 0 = already liked or missing post */
+    int exists;        /* 1 = post exists */
+} like_arg_t;
+
+static int like_fn(void *argp)
+{
+    like_arg_t *a = argp;
+    sqlite3_stmt *s = wst_like;
+    sqlite3_bind_int64(s, 1, a->uid);
+    sqlite3_bind_int64(s, 2, a->pid);
+    int rc = sqlite3_step(s);
+    sqlite3_reset(s);
+    if (rc != SQLITE_DONE) return -1;
+
+    a->inserted = sqlite3_changes(wdb) > 0;
+    if (a->inserted) return 0;
+
+    /* conflict (already liked) or the post does not exist */
+    sqlite3_stmt *t = wst_exists;
+    sqlite3_bind_int64(t, 1, a->pid);
+    rc = sqlite3_step(t);
+    sqlite3_reset(t);
+    a->exists = (rc == SQLITE_ROW);
+    return (rc == SQLITE_ROW || rc == SQLITE_DONE) ? 0 : -1;
 }
 
 void h_like(int slot, int64_t uid, int64_t pid)
 {
-    if (!db_txn_begin()) { srv_err_500(slot); return; }
-    sqlite3_bind_int64(st_like, 1, uid);
-    sqlite3_bind_int64(st_like, 2, pid);
-    int rc = sqlite3_step(st_like);
-    sqlite3_reset(st_like);
-    if (rc != SQLITE_DONE) { srv_err_500(slot); return; }
+    like_arg_t a = { .uid = uid, .pid = pid };
+    if (!write_txn(like_fn, &a)) { srv_err_500(slot); return; }
+    if (!a.inserted && !a.exists) { srv_err(slot, 404, "post not found"); return; }
 
-    int inserted = sqlite3_changes(db) > 0;
-    if (!inserted) {
-        /* conflict (already liked) or the post does not exist */
-        sqlite3_bind_int64(st_exists, 1, pid);
-        rc = sqlite3_step(st_exists);
-        sqlite3_reset(st_exists);
-        if (rc == SQLITE_DONE) { srv_err(slot, 404, "post not found"); return; }
-        if (rc != SQLITE_ROW) { srv_err_500(slot); return; }
-    }
     char rb[96], *o = rb;
     memcpy(o, "{\"liked\":true,\"already_liked\":", 30); o += 30;
-    if (inserted) { memcpy(o, "false", 5); o += 5; }
+    if (a.inserted) { memcpy(o, "false", 5); o += 5; }
     else { memcpy(o, "true", 4); o += 4; }
     memcpy(o, ",\"post_id\":", 11); o += 11;
     o = u64_to(o, (uint64_t)pid);
     *o++ = '}';
-    respond(slot, inserted ? 201 : 200, rb, (size_t)(o - rb), 0);
+    respond(slot, a.inserted ? 201 : 200, rb, (size_t)(o - rb), 0);
 }
 
 /* ---------------------------------------------------------------- readers */
@@ -341,7 +396,9 @@ static void h_feed_ref(int slot)
 
 /* The 20 newest posts nearly always have adjacent ids: three range scans
  * (ids from the index, like counts, rows) beat 20 correlated subqueries.
- * Each response still comes from queries for that request. */
+ * Each response still comes from queries for that request. If a write
+ * lands between the queries, the shape check catches it and the reference
+ * query re-reads one consistent snapshot. */
 void h_feed(int slot)
 {
     int64_t ids[20], likes[20] = { 0 };
@@ -441,7 +498,7 @@ void h_health(int slot)
         respond(slot, 200, rb, (size_t)(o - rb), 0);
         return;
     }
-    const char *m = sqlite3_errmsg(db);
+    const char *m = sqlite3_errmsg(rdb);
     body.len = 0;
     BUF_LIT(&body, "{\"status\":\"degraded\",\"db\":\"unreachable\",\"error\":\"");
     if (buf_reserve(&body, 6 * strlen(m) + 32)) {

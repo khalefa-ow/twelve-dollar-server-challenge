@@ -65,7 +65,6 @@ enum {
     B_CLOSING = 1 << 3,
     B_SHUT = 1 << 4,
     B_PAUSED = 1 << 5,
-    B_TXN_NOTED = 1 << 6,
     B_DIRTY = 1 << 7,
 };
 
@@ -96,7 +95,6 @@ static __thread int epfd = -1;
 static __thread int *dirty;
 static __thread int ndirty;
 
-static pthread_mutex_t db_mu = PTHREAD_MUTEX_INITIALIZER;
 static int listen_fd;
 static int nslots;              /* file table slots (shared, set before workers start) */
 static int g_mode_uring = 1;    /* 0: epoll fallback */
@@ -137,18 +135,6 @@ static const char *status_line(int st, size_t *n)
 #undef S
 }
 
-/* Responses queued while the group transaction is open: if the commit fails,
- * they are replaced with one 500 per connection. */
-static __thread struct {
-    int slot;
-    uint32_t gen;
-    uint32_t start;
-} txn_resps[1024];
-static __thread int n_txn_resps;
-
-int srv_in_txn(void) { return db_in_txn(); }
-void srv_set_txn_noted(int slot) { C(slot)->bits |= B_TXN_NOTED; }
-void srv_clear_txn_noted(int slot) { C(slot)->bits &= (uint8_t)~B_TXN_NOTED; }
 int conn_open(int slot) { return (C(slot)->bits & B_OPEN) != 0; }
 uint32_t conn_gen(int slot) { return C(slot)->gen; }
 uint32_t conn_out_len(int slot) { return C(slot)->out.len; }
@@ -169,15 +155,6 @@ char *resp_alloc(int slot, int status, size_t n, int close_conn)
     conn_t *c = C(slot);
     if (!(c->bits & B_OPEN)) return NULL;
     if (c->conn_hdr == 1) close_conn = 1;
-
-    if (db_in_txn() && !(c->bits & B_TXN_NOTED) &&
-        n_txn_resps < (int)(sizeof txn_resps / sizeof txn_resps[0])) {
-        txn_resps[n_txn_resps].slot = slot;
-        txn_resps[n_txn_resps].gen = c->gen;
-        txn_resps[n_txn_resps].start = c->out.len;
-        n_txn_resps++;
-        c->bits |= B_TXN_NOTED;
-    }
 
     size_t sl;
     const char *s = status_line(status, &sl);
@@ -235,26 +212,6 @@ void srv_send_continue(int slot)
 }
 void srv_reset_continue(int slot) { C(slot)->sent_continue = 0; }
 void srv_set_conn_hdr(int slot, int mode) { C(slot)->conn_hdr = (uint8_t)mode; }
-
-/* ---------------------------------------------------------------- batching */
-
-static void end_batch(void)
-{
-    if (!db_in_txn()) return;
-    int ok = db_commit();
-    for (int i = 0; i < n_txn_resps; i++) {
-        int slot = txn_resps[i].slot;
-        conn_t *c = C(slot);
-        if ((c->bits & B_TXN_NOTED) && c->gen == txn_resps[i].gen && (c->bits & B_OPEN))
-            c->bits &= (uint8_t)~B_TXN_NOTED;
-        if (ok) continue;
-        if (!(c->bits & B_OPEN) || c->gen != txn_resps[i].gen) continue;
-        c->out.len = txn_resps[i].start;
-        c->bits &= (uint8_t)~B_CLOSING;
-        srv_err_500(slot);
-    }
-    n_txn_resps = 0;
-}
 
 /* ---------------------------------------------------------------- request flow */
 
@@ -620,6 +577,7 @@ static void *u_worker_main(void *arg)
     unsigned last_n = 0;
     int rc = 0;
     if (u_worker_init(id)) return NULL;
+    db_thread_init();
 
     u_arm_accept();
     io_uring_submit(&ring);
@@ -655,7 +613,6 @@ static void *u_worker_main(void *arg)
             io_uring_submit(&ring);
         }
 
-        pthread_mutex_lock(&db_mu);
         io_uring_for_each_cqe(&ring, head, cqe) {
             n++;
             uint64_t u = cqe->user_data;
@@ -672,8 +629,6 @@ static void *u_worker_main(void *arg)
         last_n = n;
         if (buf_adds) { io_uring_buf_ring_advance(bufring, buf_adds); buf_adds = 0; }
         u_return_bufs();
-        end_batch();
-        pthread_mutex_unlock(&db_mu);
         u_flush_dirty();
 
         uint64_t now = now_mono_ms();
@@ -813,6 +768,7 @@ static void *e_worker_main(void *arg)
 {
     int id = (int)(intptr_t)arg;
     if (e_worker_init(id)) return NULL;
+    db_thread_init();
     struct epoll_event evs[256];
     uint64_t last_sweep = now_mono_ms();
     char rbuf[16384];
@@ -832,7 +788,6 @@ static void *e_worker_main(void *arg)
         if (q != last && atomic_compare_exchange_strong(&memcheck_q, &last, q)) check_memory();
         int low = atomic_load(&mem_low);
 
-        pthread_mutex_lock(&db_mu);
         for (int i = 0; i < n; i++) {
             uint32_t slot = (uint32_t)(evs[i].data.u64 & 0xffffffff);
             uint32_t gen = (uint32_t)(evs[i].data.u64 >> 32);
@@ -893,8 +848,6 @@ static void *e_worker_main(void *arg)
                 }
             }
         }
-        end_batch();
-        pthread_mutex_unlock(&db_mu);
         e_flush_dirty();
 
         uint64_t now = now_mono_ms();
@@ -1011,7 +964,16 @@ int main(int argc, char **argv)
     rl.rlim_cur = rl.rlim_max;
     setrlimit(RLIMIT_NOFILE, &rl);
     getrlimit(RLIMIT_NOFILE, &rl);
-    nslots = (int)(rl.rlim_cur > 65535 ? 65535 : rl.rlim_cur);
+    {
+        /* bench fork: MAXCONN lifts the default 64k connection cap so
+         * load tests can push past it. default behavior is unchanged. */
+        rlim_t cap = 65535;
+        const char *mc = getenv("MAXCONN");
+        if (mc && atol(mc) > 0) cap = (rlim_t)atol(mc);
+        if (cap > rl.rlim_cur) cap = rl.rlim_cur;
+        if (cap > 2000000) cap = 2000000;
+        nslots = (int)cap;
+    }
     if (nslots <= ACCEPT_RESUME) {
         fprintf(stderr, "RLIMIT_NOFILE too low (%d)\n", nslots);
         return 1;

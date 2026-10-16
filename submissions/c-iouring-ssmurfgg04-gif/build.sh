@@ -19,7 +19,7 @@ LIBURING_SHA=8d052f2622dcb3678cbaee5ff582a87572672a6c0a56533cdda5b65cb636120a
 
 # Compile flags. -march=native: the challenge box builds and runs on the same
 # machine. -fprofile-update=atomic: worker threads run profiled code.
-SQLITE_CFLAGS="-O3 -march=native -fomit-frame-pointer -DSQLITE_THREADSAFE=0 \
+SQLITE_CFLAGS="-O3 -march=native -fomit-frame-pointer -DSQLITE_THREADSAFE=2 \
  -DSQLITE_DEFAULT_MEMSTATUS=0 -DSQLITE_DQS=0 -DSQLITE_OMIT_LOAD_EXTENSION \
  -DSQLITE_OMIT_DEPRECATED -DSQLITE_OMIT_SHARED_CACHE -DSQLITE_OMIT_PROGRESS_CALLBACK \
  -DHAVE_FDATASYNC=1 -DSQLITE_LIKE_DOESNT_MATCH_BLOBS -DSQLITE_MAX_EXPR_DEPTH=0 \

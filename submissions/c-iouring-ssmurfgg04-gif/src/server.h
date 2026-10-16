@@ -22,12 +22,7 @@ void srv_send_continue(int slot);
 void srv_reset_continue(int slot);
 void srv_set_conn_hdr(int slot, int mode);
 
-/* Transaction bookkeeping (server.c owns the response buffers). */
-int srv_in_txn(void);
-void srv_set_txn_noted(int slot);
-void srv_clear_txn_noted(int slot);
-
-/* Connection introspection used by the transaction retry logic. */
+/* Connection introspection used by the feed retry logic. */
 int conn_open(int slot);
 uint32_t conn_gen(int slot);
 uint32_t conn_out_len(int slot);
