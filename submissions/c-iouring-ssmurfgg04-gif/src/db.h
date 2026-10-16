@@ -10,6 +10,9 @@ void db_close(void);
  * serving requests; call once at thread start. Idempotent. */
 void db_thread_init(void);
 
+/* instrumentation hook, called by server.c per handled request */
+void db_req_note(long long us);
+
 void h_health(int slot);
 void h_feed(int slot);
 void h_post(int slot, int64_t id);

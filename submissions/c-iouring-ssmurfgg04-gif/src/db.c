@@ -5,7 +5,9 @@
  * needed and responses can be sent immediately). */
 #define _GNU_SOURCE
 #include <fcntl.h>
+#include <sys/stat.h>
 #include <pthread.h>
+#include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -24,6 +26,41 @@ static pthread_mutex_t write_mu = PTHREAD_MUTEX_INITIALIZER;
 static struct timespec start_ts;
 static volatile int db_stop;           /* stops the checkpointer thread */
 static sqlite3_stmt *wst_create, *wst_like, *wst_exists; /* on wdb, under write_mu */
+
+/* instrumentation: feed handler time and busy counts, logged by the
+ * checkpointer thread so bench runs leave evidence in the server log */
+static _Atomic long long feed_n, feed_us, feed_max_us, feed_busy;
+static _Atomic long long post_n, post_us, post_busy;
+static _Atomic long long req_n, req_us, req_max_us;
+
+void db_req_note(long long us)
+{
+    atomic_fetch_add(&req_n, 1);
+    atomic_fetch_add(&req_us, us);
+    long long mx = atomic_load(&req_max_us);
+    if (us > mx) atomic_compare_exchange_strong(&req_max_us, &mx, us);
+}
+
+static inline void post_note(long long us)
+{
+    atomic_fetch_add(&post_n, 1);
+    atomic_fetch_add(&post_us, us);
+}
+
+static inline void feed_note(long long us)
+{
+    atomic_fetch_add(&feed_n, 1);
+    atomic_fetch_add(&feed_us, us);
+    long long mx = atomic_load(&feed_max_us);
+    if (us > mx) atomic_compare_exchange_strong(&feed_max_us, &mx, us);
+}
+
+static inline long long now_us_db(void)
+{
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (long long)ts.tv_sec * 1000000 + ts.tv_nsec / 1000;
+}
 
 /* per worker: private read connection + statements, zero locking */
 static __thread sqlite3 *rdb;
@@ -144,6 +181,28 @@ static void *checkpointer_main(void *arg)
                 fprintf(stderr, "checkpoint: %s (busy=%d)\n",
                         sqlite3_errmsg(wdb), busy);
             }
+        }
+        long long fn = atomic_load(&feed_n), fu = atomic_load(&feed_us);
+        long long pn = atomic_load(&post_n), pu = atomic_load(&post_us);
+        if (fn + pn >= 50) {
+            char walp[512];
+            long long walsz = -1;
+            snprintf(walp, sizeof walp, "%s-wal", sqlite3_db_filename(wdb, "main"));
+            struct stat st;
+            if (stat(walp, &st) == 0) walsz = (long long)st.st_size;
+            fprintf(stderr,
+                "dbstats: feed n=%lld avg=%.1fms max=%.1fms busy=%lld | "
+                "post n=%lld avg=%.1fms busy=%lld | wal=%lldKB\n",
+                fn, fn ? (double)fu / fn / 1000.0 : 0.0,
+                (double)atomic_load(&feed_max_us) / 1000.0,
+                atomic_load(&feed_busy),
+                pn, pn ? (double)pu / pn / 1000.0 : 0.0,
+                atomic_load(&post_busy), walsz < 0 ? -1 : walsz / 1024);
+            long long rn = atomic_load(&req_n);
+            if (rn)
+                fprintf(stderr, "dbstats: req n=%lld avg=%.1fms max=%.1fms\n",
+                        rn, (double)atomic_load(&req_us) / rn / 1000.0,
+                        (double)atomic_load(&req_max_us) / 1000.0);
         }
     }
     return NULL;
@@ -430,6 +489,7 @@ static void h_feed_ref(int slot)
  * query re-reads one consistent snapshot. */
 void h_feed(int slot)
 {
+    long long t0 = now_us_db();
     int64_t ids[20], likes[20] = { 0 };
     uint32_t seg[20], seglen[20];
     int8_t slot_of[FEED_SPAN];
@@ -438,6 +498,7 @@ void h_feed(int slot)
     while (n < 20 && (rc = sqlite3_step(st_feed_ids)) == SQLITE_ROW)
         ids[n++] = sqlite3_column_int64(st_feed_ids, 0);
     sqlite3_reset(st_feed_ids);
+    if (rc == SQLITE_BUSY) atomic_fetch_add(&feed_busy, 1);
     if (n < 20 && rc != SQLITE_DONE) { srv_err_500(slot); return; }
     if (!n) { respond(slot, 200, "{\"posts\":[]}", 12, 0); return; }
 
@@ -457,7 +518,8 @@ void h_feed(int slot)
         if (k >= 0) likes[k]++;
     }
     sqlite3_reset(st_like_range);
-    if (rc != SQLITE_DONE) { srv_err_500(slot); return; }
+    if (rc == SQLITE_BUSY) atomic_fetch_add(&feed_busy, 1);
+    if (rc != SQLITE_DONE) { srv_err_500(slot); feed_note(now_us_db() - t0); return; }
 
     int found = 0;
     body.len = 0;
@@ -476,8 +538,9 @@ void h_feed(int slot)
         found++;
     }
     sqlite3_reset(st_feed_rows);
-    if (rc != SQLITE_DONE) { srv_err_500(slot); return; }
-    if (found != n) { h_feed_ref(slot); return; } /* concurrent writer: retry */
+    if (rc == SQLITE_BUSY) atomic_fetch_add(&feed_busy, 1);
+    if (rc != SQLITE_DONE) { srv_err_500(slot); feed_note(now_us_db() - t0); return; }
+    if (found != n) { h_feed_ref(slot); feed_note(now_us_db() - t0); return; } /* concurrent writer: retry */
 
     size_t total = 10 + body.len + (size_t)(n - 1) + 2;
     char *o = resp_alloc(slot, 200, total, 0);
@@ -489,10 +552,12 @@ void h_feed(int slot)
         o += seglen[k];
     }
     memcpy(o, "]}", 2);
+    feed_note(now_us_db() - t0);
 }
 
 void h_post(int slot, int64_t id)
 {
+    long long t0 = now_us_db();
     sqlite3_bind_int64(st_post, 1, id);
     int rc = sqlite3_step(st_post);
     if (rc == SQLITE_ROW) {
@@ -509,6 +574,8 @@ void h_post(int slot, int64_t id)
         return;
     }
     sqlite3_reset(st_post);
+    if (rc == SQLITE_BUSY) atomic_fetch_add(&post_busy, 1);
+    post_note(now_us_db() - t0);
     if (rc == SQLITE_DONE) { srv_err(slot, 404, "post not found"); return; }
     srv_err_500(slot);
 }

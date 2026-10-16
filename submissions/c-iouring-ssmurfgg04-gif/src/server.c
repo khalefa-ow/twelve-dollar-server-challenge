@@ -236,7 +236,9 @@ void on_data(int slot, const char *data, size_t n)
             if (g_mode_uring) u_pause_recv(slot);
             break;
         }
+        long long _t0 = now_mono_us();
         size_t r = handle_request(slot, p + off, n - off);
+        db_req_note(now_mono_us() - _t0);
         if (!r) break;
         off += r;
         c->since_ms = now;

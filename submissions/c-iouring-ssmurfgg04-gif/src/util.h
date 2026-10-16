@@ -27,6 +27,7 @@ static inline char *u64_to(char *o, uint64_t v)
 
 /* Monotonic milliseconds since an arbitrary start (used for stalls/uptime). */
 uint64_t now_mono_ms(void);
+long long now_mono_us(void);
 
 /* Wall clock with sub-second precision (JWT exp/nbf). */
 double now_realtime(void);
