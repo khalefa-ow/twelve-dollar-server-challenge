@@ -21,8 +21,8 @@
 
 static sqlite3 *wdb;                    /* the one writer */
 static pthread_mutex_t write_mu = PTHREAD_MUTEX_INITIALIZER;
-static int wal_frames;                  /* guarded by write_mu */
 static struct timespec start_ts;
+static volatile int db_stop;           /* stops the checkpointer thread */
 static sqlite3_stmt *wst_create, *wst_like, *wst_exists; /* on wdb, under write_mu */
 
 /* per worker: private read connection + statements, zero locking */
@@ -50,13 +50,6 @@ static void exec_or_die(sqlite3 *d, const char *sql)
     }
 }
 
-static int wal_hook(void *arg, sqlite3 *d, const char *name, int frames)
-{
-    (void)arg; (void)d; (void)name;
-    wal_frames = frames;
-    return SQLITE_OK;
-}
-
 void db_thread_init(void)
 {
     if (rdb) return;
@@ -81,6 +74,8 @@ void db_thread_init(void)
     st_ping = prep(rdb, "SELECT 1");
 }
 
+static void *checkpointer_main(void *arg);
+
 void db_open(const char *path)
 {
     if (sqlite3_open_v2(path, &wdb, SQLITE_OPEN_READWRITE | SQLITE_OPEN_NOMUTEX, NULL) != SQLITE_OK) {
@@ -88,7 +83,11 @@ void db_open(const char *path)
         exit(1);
     }
     sqlite3_busy_timeout(wdb, 5000);
-    /* WAL lets every worker read its own snapshot while the writer runs. */
+    /* WAL lets every worker read its own snapshot while the writer runs.
+     * wal_autocheckpoint stays off: our checkpointer thread owns resets,
+     * because PASSIVE checkpoints starve under always-busy readers and an
+     * unreset WAL grows forever (every page lookup then scans wal-index
+     * hash sections with no bound). */
     exec_or_die(wdb,
         "PRAGMA journal_mode=WAL;"
         "PRAGMA synchronous=NORMAL;"
@@ -97,7 +96,6 @@ void db_open(const char *path)
         "PRAGMA temp_store=MEMORY;"
         "PRAGMA journal_size_limit=67108864;"
         "PRAGMA wal_autocheckpoint=0;");
-    sqlite3_wal_hook(wdb, wal_hook, NULL);
 
     wst_create = prep(wdb,
         "INSERT INTO posts (user_id, body) VALUES (?1, ?2) RETURNING id, created_at");
@@ -115,10 +113,45 @@ void db_open(const char *path)
         posix_fadvise(fd, 0, 0, POSIX_FADV_WILLNEED);
         close(fd);
     }
+
+    /* background checkpointer: TRUNCATE every 2 s so the WAL and its
+     * wal-index stay small no matter how busy the readers are */
+    pthread_t cp;
+    if (pthread_create(&cp, NULL, checkpointer_main, NULL) == 0)
+        pthread_detach(cp);
+}
+
+/* One full checkpoint (reset + truncate) every 2 seconds. TRUNCATE briefly
+ * blocks new read transactions and waits out the in-flight ones (~micro-
+ * seconds each here), which is the only way the reset happens under a
+ * constant read load. Without it the WAL grows without bound. */
+static void *checkpointer_main(void *arg)
+{
+    (void)arg;
+    while (!db_stop) {
+        struct timespec ts = { 2, 0 };
+        nanosleep(&ts, NULL);
+        if (db_stop) break;
+        pthread_mutex_lock(&write_mu);
+        int busy = 0, ck = sqlite3_wal_checkpoint_v2(wdb, NULL,
+                          SQLITE_CHECKPOINT_TRUNCATE, NULL, &busy);
+        pthread_mutex_unlock(&write_mu);
+        if (ck != SQLITE_OK) {
+            static time_t last;
+            time_t now = time(NULL);
+            if (now != last) {
+                last = now;
+                fprintf(stderr, "checkpoint: %s (busy=%d)\n",
+                        sqlite3_errmsg(wdb), busy);
+            }
+        }
+    }
+    return NULL;
 }
 
 void db_close(void)
 {
+    db_stop = 1;
     if (rdb) sqlite3_close(rdb);
     sqlite3_close(wdb);
 }
@@ -153,10 +186,6 @@ static int write_txn(int (*fn)(void *arg), void *arg)
             struct timespec ts = { 0, 2000000 };
             nanosleep(&ts, NULL);
         }
-    }
-    if (ok && wal_frames >= 4000) {
-        sqlite3_wal_checkpoint_v2(wdb, NULL, SQLITE_CHECKPOINT_PASSIVE, NULL, NULL);
-        wal_frames = 0;
     }
     pthread_mutex_unlock(&write_mu);
     return ok;
